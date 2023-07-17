@@ -1,0 +1,55 @@
+version: "3.9"
+services:
+  neo4j_100:
+    image: neo4j:5.7
+    container_name: neo4j_100
+    environment:
+    - NEO4J_AUTH=neo4j/neo4jpassword
+    - NEO4J_apoc_export_file_enabled=true
+    - NEO4J_apoc_import_file_enabled=true
+    - NEO4J_apoc_import_file_use__neo4j__config=true
+    - NEO4J_PLUGINS=["apoc"]
+    volumes:
+      - ./neo4j_100/data:/data
+      - ./neo4j_100/logs:/logs
+      - ./data:/import
+
+  neo4j_200:
+    image: neo4j:5.7
+    container_name: neo4j_200
+    environment:
+    - NEO4J_AUTH=neo4j/neo4jpassword
+    - NEO4J_apoc_export_file_enabled=true
+    - NEO4J_apoc_import_file_enabled=true
+    - NEO4J_apoc_import_file_use__neo4j__config=true
+    - NEO4J_PLUGINS=["apoc"]
+    volumes:
+      - ./neo4j_200/data:/data
+      - ./neo4j_200/logs:/logs
+      - ./data:/import
+
+  neo4j_300:
+    image: neo4j:5.7
+    container_name: neo4j_300
+    environment:
+    - NEO4J_AUTH=neo4j/neo4jpassword
+    - NEO4J_apoc_export_file_enabled=true
+    - NEO4J_apoc_import_file_enabled=true
+    - NEO4J_apoc_import_file_use__neo4j__config=true
+    - NEO4J_PLUGINS=["apoc"]
+    volumes:
+      - ./neo4j_300/data:/data
+      - ./neo4j_300/logs:/logs
+      - ./data:/import
+
+  app:
+    build: .
+    container_name: app
+    depends_on:
+      - neo4j_100
+      - neo4j_200
+      - neo4j_300
+    volumes:
+      - ./data:/app/data
+      - ./output:/app/output
+
