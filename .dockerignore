@@ -1,7 +1,9 @@
 # Datasets
 **/*.pkl
 **/*.csv
+**/*.db
 data/
+
 
 # Repository
 README.md
@@ -95,3 +97,9 @@ venv/
 
 # VS Code
 .vscode/
+
+neo4j_100/
+neo4j_200/
+neo4j_300/
+
+output/

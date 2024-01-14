@@ -5,5 +5,6 @@ class Config:
         self.Host_name = f"neo4j_{size}"
         self.Port = 7687
         self.Url = f"{self.Scheme}://{self.Host_name}:{self.Port}"
+        
         self.User = "neo4j"
         self.Password = "neo4jpassword"

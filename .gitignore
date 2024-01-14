@@ -9,6 +9,9 @@ dump.txt
 *.csv
 data/*
 output/*
+neo4j_100/*
+neo4j_200/*
+neo4j_300/*
 
 ### Linux ###
 *~
@@ -264,3 +267,6 @@ $RECYCLE.BIN/
 *.lnk
 
 # End of https://www.toptal.com/developers/gitignore/api/linux,macos,python,windows,visualstudiocode
+/neo4j_100/
+/neo4j_200/
+/neo4j_300/

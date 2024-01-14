@@ -2,6 +2,7 @@ import os
 from neo4j import GraphDatabase
 import logging
 
+
 class Database:
 
     def __init__(self, uri, user, password, dir_output):
@@ -11,9 +12,10 @@ class Database:
         if not os.path.exists(self.dir_output):
             os.makedirs(self.dir_output)
 
-        self.logger = logging.getLogger(uri)    
+        self.logger = logging.getLogger(uri)
         open(f"{self.dir_output}/log.txt", "w")
-        self.logger.addHandler(logging.FileHandler(f"{self.dir_output}/log.txt"))
+        self.logger.addHandler(logging.FileHandler(
+            f"{self.dir_output}/log.txt"))
 
     def close(self):
         # Don't forget to close the driver connection when you are finished with it
@@ -21,7 +23,7 @@ class Database:
 
     def load_customer(self, path):
         with self.driver.session() as session:
-            query =  (
+            query = (
                 "LOAD CSV WITH HEADERS FROM $path AS row "
                 "WITH toInteger(row.CUSTOMER_ID) AS CUSTOMER_ID, "
                 "     toFloat(row.x_customer_id) AS x_customer_id, "
@@ -67,35 +69,83 @@ class Database:
             total_time = avail + cons
             self.logger.info(f"Time: {total_time} ms")
 
-    def load_transaction(self, path):
-        with self.driver.session() as session:
-            query = (
-                "LOAD CSV WITH HEADERS FROM $path AS row "
-                "CALL { "
-                "    WITH row "
-                "    WITH toInteger(row.TRANSACTION_ID) AS TRANSACTION_ID, "
-                "         datetime(replace(row.TX_DATETIME,' ','T')) AS TX_DATETIME, "
-                "         toFloat(row.TX_AMOUNT) AS TX_AMOUNT, "
-                "         toInteger(row.TX_FRAUD) AS TX_FRAUD, "
-                "         toInteger(row.CUSTOMER_ID) AS CUSTOMER_ID, "
-                "         toInteger(row.TERMINAL_ID) AS TERMINAL_ID "
-                "    WHERE TRANSACTION_ID IS NOT NULL "
-                "    MATCH (terminal:Terminal { TERMINAL_ID: TERMINAL_ID }), "
-                "          (customer:Customer { CUSTOMER_ID: CUSTOMER_ID }) "
-                "    MERGE (terminal)-[execute:EXECUTE]-> "
-                "          (t:Transaction { TRANSACTION_ID : TRANSACTION_ID, "
-                "                           TX_DATETIME : TX_DATETIME, "
-                "                           TX_AMOUNT : TX_AMOUNT, "
-                "                           TX_FRAUD : TX_FRAUD }) "
-                "          <-[make:MAKE]-(customer) "
-                "} IN TRANSACTIONS;"
-            )
 
-            self.logger.info(f"Load transaction csv from {path}")
-            result = session.run(query, path=path)
+    def parse_csv_line(self, line):
+        # Parse the line and create a dictionary
+        # You'll need to customize this function based on your CSV structure
+        # Example:
+        columns = line.strip().split(',')
+        data = {
+            "TRANSACTION_ID": columns[0],
+            "TX_DATETIME": columns[1],
+            "TX_AMOUNT": columns[2],
+            "TX_FRAUD": columns[3],
+            "CUSTOMER_ID": columns[4],
+            "TERMINAL_ID": columns[5]
+        }
+        return data
+
+    def process_chunk_transaction(self, lines):
+        query = (
+            "UNWIND $batch AS row "
+            "CALL { "
+            "    WITH row "
+            "    WITH toInteger(row.TRANSACTION_ID) AS TRANSACTION_ID, "
+            "         datetime(replace(row.TX_DATETIME, ' ', 'T')) AS TX_DATETIME, "
+            "         toFloat(row.TX_AMOUNT) AS TX_AMOUNT, "
+            "         toInteger(row.TX_FRAUD) AS TX_FRAUD, "
+            "         toInteger(row.CUSTOMER_ID) AS CUSTOMER_ID, "
+            "         toInteger(row.TERMINAL_ID) AS TERMINAL_ID "
+            "    WHERE TRANSACTION_ID IS NOT NULL "
+            "    MATCH (terminal:Terminal { TERMINAL_ID: TERMINAL_ID }), "
+            "          (customer:Customer { CUSTOMER_ID: CUSTOMER_ID }) "
+            "    MERGE (terminal)-[execute:EXECUTE]-> "
+            "          (t:Transaction { TRANSACTION_ID : TRANSACTION_ID, "
+            "                           TX_DATETIME : TX_DATETIME, "
+            "                           TX_AMOUNT : TX_AMOUNT, "
+            "                           TX_FRAUD : TX_FRAUD }) "
+            "          <-[make:MAKE]-(customer) "
+            "} IN TRANSACTIONS;"
+        )
+        summary = 0
+        with self.driver.session() as session:
+            result = session.run(query, batch=lines)
             summary = result.consume()
-            avail = summary.result_available_after
-            cons = summary.result_consumed_after
+        print("Summary: ", summary)
+        return summary
+
+    def load_transaction(self, path):
+        self.logger.info(f"Load transaction csv from {path}")
+        cnt = 0
+        chunk_size = 500000
+
+        with open(path, 'r') as f:
+            next(f)
+
+            # Read the CSV file line by line in chunks
+            avail = 0
+            cons = 0
+            lines = []
+
+            # Row count to process and log it
+            row_count = sum(1 for row in f)
+            self.logger.info(f"Pre-load: total {row_count} lines")
+
+            for line in f:
+                data = self.parse_csv_line(line)
+                lines.append(data)
+                if len(lines) == chunk_size:
+                    cnt += chunk_size
+                    self.logger.info(f"Chunk: {cnt} lines")
+                    summary = self.process_chunk_transaction(lines)
+                    avail += summary.result_available_after
+                    cons += summary.result_consumed_after
+                    lines = []
+
+            # Process any remaining lines
+            if lines:
+                self.process_chunk_transaction(lines)
+
             total_time = avail + cons
             self.logger.info(f"Time: {total_time} ms")
 
@@ -167,7 +217,7 @@ class Database:
             total_time = avail + cons
             self.logger.info(f"Time: {total_time} ms")
             self.logger.info(f"Results:\n{values}")
-            
+
             values.to_csv(f"{self.dir_output}/Q1.csv", index=False)
             self.logger.info(f"Results saved in {self.dir_output}/Q1.csv")
 
@@ -203,7 +253,7 @@ class Database:
             total_time = avail + cons
             self.logger.info(f"Time: {total_time} ms")
             self.logger.info(f"Results:\n{values}")
-            
+
             values.to_csv(f"{self.dir_output}/Q2.csv", index=False)
             self.logger.info(f"Results saved in {self.dir_output}/Q2.csv")
 
@@ -225,13 +275,13 @@ class Database:
             cons = summary.result_consumed_after
             total_time = avail + cons
             self.logger.info(f"Time: {total_time} ms")
-            
+
             query = (
                 "MATCH (user1:Customer)-[:USE*4]-(user2:Customer) "
                 "WHERE id(user1) < id(user2) "
                 "RETURN DISTINCT user1.CUSTOMER_ID, user2.CUSTOMER_ID;"
             )
-            
+
             self.logger.info(f"Query 3")
             result = session.run(query)
             values = result.to_df()
@@ -241,7 +291,7 @@ class Database:
             total_time = avail + cons
             self.logger.info(f"Time: {total_time} ms")
             self.logger.info(f"Results:\n{values}")
-            
+
             values.to_csv(f"{self.dir_output}/Q3.csv", index=False)
             self.logger.info(f"Results saved in {self.dir_output}/Q3.csv")
 
@@ -261,7 +311,7 @@ class Database:
                 "    SET t.period = period"
                 "} IN TRANSACTIONS;"
             )
-            
+
             self.logger.info(f"Query 4.1")
             result = session.run(query)
             summary = result.consume()
@@ -288,7 +338,7 @@ class Database:
                 "    SET t.product = product "
                 "} IN TRANSACTIONS;"
             )
-            
+
             self.logger.info(f"Query 4.2")
             result = session.run(query)
             summary = result.consume()
@@ -310,7 +360,7 @@ class Database:
                 "WITH pair[0] as first, pair[1] as second "
                 "MERGE (first)-[:BUYING_FRIEND]-(second);"
             )
-            
+
             self.logger.info(f"Query 4.3")
             result = session.run(query)
             summary = result.consume()
@@ -326,7 +376,7 @@ class Database:
                 "WHERE id(user1) < id(user2) "
                 "RETURN DISTINCT user1.CUSTOMER_ID, user2.CUSTOMER_ID;"
             )
-            
+
             self.logger.info(f"Query 5")
             result = session.run(query)
             values = result.to_df()

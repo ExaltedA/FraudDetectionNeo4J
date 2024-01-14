@@ -1,4 +1,9 @@
 version: "3.9"
+
+networks:
+  kassa:
+    external: true
+
 services:
   neo4j_100:
     image: neo4j:5.7
