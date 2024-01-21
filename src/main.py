@@ -9,7 +9,7 @@ import logging
 # GLOBAL CONSTANTS
 DIR_DATA = "./data"
 DIR_OUTPUT = "./output"
-START_DATE = "2022-01-01"
+START_DATE = "2023-01-01"
 RADIUS = 5
 
 if __name__ == "__main__":
@@ -17,7 +17,7 @@ if __name__ == "__main__":
     SetUpLogger()
     logger = logging.getLogger("generator")
 
-    # Check if file does not exists
+    # Check if file does not exist
     dir_error_handler(DIR_DATA)
 
     open(f"{DIR_DATA}/generator_log.txt", "w")
@@ -28,7 +28,7 @@ if __name__ == "__main__":
                         200: (5000, 10000, 365),
                         300: (7500, 15000, 365)}
     # Generate all datasets
-    # generate_all_datasets(dataset_template, DIR_DATA, START_DATE, RADIUS)
+    generate_all_datasets(dataset_template, DIR_DATA, START_DATE, RADIUS)
 
     # setup connection, load and query the database
     for size in [100, 200, 300]:

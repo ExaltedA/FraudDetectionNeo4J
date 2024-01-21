@@ -69,7 +69,6 @@ class Database:
             total_time = avail + cons
             self.logger.info(f"Time: {total_time} ms")
 
-
     def parse_csv_line(self, line):
         # Parse the line and create a dictionary
         # You'll need to customize this function based on your CSV structure
@@ -111,43 +110,39 @@ class Database:
         with self.driver.session() as session:
             result = session.run(query, batch=lines)
             summary = result.consume()
-        print("Summary: ", summary)
         return summary
 
     def load_transaction(self, path):
         self.logger.info(f"Load transaction csv from {path}")
-        cnt = 0
-        chunk_size = 500000
+        chunk_size = 5000
+        total_lines_processed = 0
+        total_time_available = 0
+        total_time_consumed = 0
 
-        with open(path, 'r') as f:
-            next(f)
-
-            # Read the CSV file line by line in chunks
-            avail = 0
-            cons = 0
+        with open(path, 'r') as file:
+            next(file)  # Skip header row
             lines = []
-
-            # Row count to process and log it
-            row_count = sum(1 for row in f)
-            self.logger.info(f"Pre-load: total {row_count} lines")
-
-            for line in f:
-                data = self.parse_csv_line(line)
-                lines.append(data)
+            for line in file:
+                lines.append(self.parse_csv_line(line))
                 if len(lines) == chunk_size:
-                    cnt += chunk_size
-                    self.logger.info(f"Chunk: {cnt} lines")
                     summary = self.process_chunk_transaction(lines)
-                    avail += summary.result_available_after
-                    cons += summary.result_consumed_after
+                    total_lines_processed += len(lines)
+                    total_time_available += summary.result_available_after
+                    total_time_consumed += summary.result_consumed_after
                     lines = []
+                    self.logger.info(f"Processed {total_lines_processed} lines")
 
-            # Process any remaining lines
+            # Process remaining lines
             if lines:
-                self.process_chunk_transaction(lines)
+                summary = self.process_chunk_transaction(lines)
+                total_lines_processed += len(lines)
+                total_time_available += summary.result_available_after
+                total_time_consumed += summary.result_consumed_after
+                self.logger.info(f"Processed {total_lines_processed} lines")
 
-            total_time = avail + cons
-            self.logger.info(f"Time: {total_time} ms")
+        total_time = total_time_available + total_time_consumed
+        self.logger.info(f"Total processed lines: {total_lines_processed}")
+        self.logger.info(f"Total time: {total_time} ms")
 
     def index_customer(self):
         with self.driver.session() as session:
@@ -198,12 +193,9 @@ class Database:
         with self.driver.session() as session:
             query = (
                 "MATCH (c:Customer)-[:MAKE]->(t:Transaction) "
-                "WITH c, t, datetime.truncate('week', t.TX_DATETIME) AS week, "
-                "     CASE WHEN datetime().month < 7 "
-                "     THEN 1 ELSE 7 END AS semesterStart "
-                "WITH c, t, week, semesterStart, (semesterStart+5) AS semesterEnd "
-                "WHERE t.TX_DATETIME >= datetime({ year:datetime().year-1, month:semesterStart, day:1 }) "
-                "      AND t.TX_DATETIME <= datetime({ year:datetime().year-1, month:semesterEnd, day:1 }) "
+                "WHERE t.TX_DATETIME >= datetime({ year: datetime().year-1, month: CASE WHEN datetime().month < 7 THEN 1 ELSE 7 END, day: 1 }) "
+                "   AND t.TX_DATETIME < datetime({ year: datetime().year, month: CASE WHEN datetime().month < 7 THEN 7 ELSE 1 END, day: 1 }) "
+                "WITH c, t, datetime.truncate('week', t.TX_DATETIME) AS week "
                 "RETURN c.CUSTOMER_ID AS customer, sum(t.TX_AMOUNT) AS amount, week "
                 "ORDER BY customer, week;"
             )
@@ -226,20 +218,12 @@ class Database:
             query = (
                 "MATCH (term:Terminal)-[EXECUTE]->(trans:Transaction) "
                 "WITH term, trans, trans.TX_DATETIME.year AS year, "
-                "CASE WHEN trans.TX_DATETIME.month<7 "
-                "     THEN 'first' "
-                "     ELSE 'second' END AS semester "
+                "     CASE WHEN trans.TX_DATETIME.month < 7 THEN 'first' ELSE 'second' END AS semester "
                 "WITH term.TERMINAL_ID AS terminal, year, semester, AVG(trans.TX_AMOUNT) AS avg_amount "
-                "MATCH (t:Terminal { TERMINAL_ID: terminal })-[EXECUTE]->(tr:Transaction "
-                "WHERE "
-                "     CASE WHEN tr.TX_DATETIME.month<7 "
-                "          THEN year-1 = tr.TX_DATETIME.year "
-                "          ELSE year = tr.TX_DATETIME.year END "
-                "     AND "
-                "     CASE WHEN tr.TX_DATETIME.month<7 "
-                "          THEN semester = 'second' "
-                "          ELSE semester = 'first' END "
-                "     AND (tr.TX_AMOUNT > 1.1*avg_amount OR tr.TX_AMOUNT < 0.9*avg_amount)) "
+                "MATCH (t:Terminal { TERMINAL_ID: terminal })-[EXECUTE]->(tr:Transaction) "
+                "WHERE (tr.TX_DATETIME.month < 7 AND year - 1 = tr.TX_DATETIME.year AND semester = 'second') OR "
+                "      (tr.TX_DATETIME.month >= 7 AND year = tr.TX_DATETIME.year AND semester = 'first') "
+                "      AND (tr.TX_AMOUNT > 1.1 * avg_amount OR tr.TX_AMOUNT < 0.9 * avg_amount) "
                 "RETURN terminal, collect(tr.TRANSACTION_ID) AS transactions "
                 "ORDER BY terminal;"
             )
@@ -260,11 +244,8 @@ class Database:
     def query_3(self):
         with self.driver.session() as session:
             create_use = (
-                "MATCH (terminal: Terminal)-[execute:EXECUTE]->(transaction: Transaction)<-[make:MAKE]-(c: Customer) "
-                "CALL { "
-                "    WITH c, terminal "
-                "    MERGE (c)-[r:USE]->(terminal) "
-                "} IN TRANSACTIONS;"
+                "MATCH (terminal:Terminal)-[:EXECUTE]->(transaction:Transaction)<-[:MAKE]-(customer:Customer) "
+                "MERGE (customer)-[:USE]->(terminal);"
             )
 
             self.logger.info(f"Create USE relationship")
@@ -277,9 +258,9 @@ class Database:
             self.logger.info(f"Time: {total_time} ms")
 
             query = (
-                "MATCH (user1:Customer)-[:USE*4]-(user2:Customer) "
-                "WHERE id(user1) < id(user2) "
-                "RETURN DISTINCT user1.CUSTOMER_ID, user2.CUSTOMER_ID;"
+                "MATCH path = (u1:Customer)-[:USE*4]-(u2:Customer) "
+                "WHERE id(u1) < id(u2) "
+                "RETURN DISTINCT u1.CUSTOMER_ID AS Customer1, u2.CUSTOMER_ID AS Customer2;"
             )
 
             self.logger.info(f"Query 3")
@@ -299,17 +280,12 @@ class Database:
         with self.driver.session() as session:
             query = (
                 "MATCH (t:Transaction) "
-                "CALL { "
-                "    WITH t "
-                "    WITH "
-                "    CASE "
-                "         WHEN t.transactionDate.hour >= 0 AND t.transactionDate.hour < 6 THEN 'night' "
-                "         WHEN t.transactionDate.hour >= 6 AND t.transactionDate.hour < 12 THEN 'morning' "
-                "         WHEN t.transactionDate.hour >= 12 AND t.transactionDate.hour < 18 THEN 'afternoon' "
-                "    ELSE 'evening' "
-                "    END AS period, t "
-                "    SET t.period = period"
-                "} IN TRANSACTIONS;"
+                "SET t.period = CASE "
+                "   WHEN t.transactionDate.hour >= 0 AND t.transactionDate.hour < 6 THEN 'night' "
+                "   WHEN t.transactionDate.hour >= 6 AND t.transactionDate.hour < 12 THEN 'morning' "
+                "   WHEN t.transactionDate.hour >= 12 AND t.transactionDate.hour < 18 THEN 'afternoon' "
+                "   ELSE 'evening' "
+                "END;"
             )
 
             self.logger.info(f"Query 4.1")
@@ -324,19 +300,13 @@ class Database:
         with self.driver.session() as session:
             query = (
                 "MATCH (t:Transaction) "
-                "CALL { "
-                "    WITH t "
-                "    WITH apoc.text.random(1, '12345') AS productCode, t "
-                "    WITH "
-                "    CASE productCode "
-                "    WHEN '1' THEN 'high-tech' "
-                "    WHEN '2' THEN 'food' "
-                "    WHEN '3' THEN 'clothing' "
-                "    WHEN '4' THEN 'consumable' "
-                "    ELSE 'other' "
-                "    END AS product, t "
-                "    SET t.product = product "
-                "} IN TRANSACTIONS;"
+                "SET t.product = CASE toInteger(rand() * 5) "
+                "   WHEN 1 THEN 'high-tech' "
+                "   WHEN 2 THEN 'food' "
+                "   WHEN 3 THEN 'clothing' "
+                "   WHEN 4 THEN 'consumable' "
+                "   ELSE 'other' "
+                "END;"
             )
 
             self.logger.info(f"Query 4.2")
@@ -372,9 +342,10 @@ class Database:
     def query_5(self):
         with self.driver.session() as session:
             query = (
-                "MATCH (user1:Customer)-[:BUYING_FRIEND*4]-(user2:Customer) "
-                "WHERE id(user1) < id(user2) "
-                "RETURN DISTINCT user1.CUSTOMER_ID, user2.CUSTOMER_ID;"
+                "MATCH path = (c:Customer)-[:BUYING_FRIEND*4]-(friend:Customer) "
+                "WHERE c <> friend "
+                "RETURN c.CUSTOMER_ID AS CustomerID, friend.CUSTOMER_ID AS FriendID, LENGTH(path) AS Degree "
+                "ORDER BY CustomerID, FriendID;"
             )
 
             self.logger.info(f"Query 5")
