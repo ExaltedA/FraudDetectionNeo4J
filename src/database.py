@@ -69,80 +69,37 @@ class Database:
             total_time = avail + cons
             self.logger.info(f"Time: {total_time} ms")
 
-    def parse_csv_line(self, line):
-        # Parse the line and create a dictionary
-        # You'll need to customize this function based on your CSV structure
-        # Example:
-        columns = line.strip().split(',')
-        data = {
-            "TRANSACTION_ID": columns[0],
-            "TX_DATETIME": columns[1],
-            "TX_AMOUNT": columns[2],
-            "TX_FRAUD": columns[3],
-            "CUSTOMER_ID": columns[4],
-            "TERMINAL_ID": columns[5]
-        }
-        return data
-
-    def process_chunk_transaction(self, lines):
-        query = (
-            "UNWIND $batch AS row "
-            "CALL { "
-            "    WITH row "
-            "    WITH toInteger(row.TRANSACTION_ID) AS TRANSACTION_ID, "
-            "         datetime(replace(row.TX_DATETIME, ' ', 'T')) AS TX_DATETIME, "
-            "         toFloat(row.TX_AMOUNT) AS TX_AMOUNT, "
-            "         toInteger(row.TX_FRAUD) AS TX_FRAUD, "
-            "         toInteger(row.CUSTOMER_ID) AS CUSTOMER_ID, "
-            "         toInteger(row.TERMINAL_ID) AS TERMINAL_ID "
-            "    WHERE TRANSACTION_ID IS NOT NULL "
-            "    MATCH (terminal:Terminal { TERMINAL_ID: TERMINAL_ID }), "
-            "          (customer:Customer { CUSTOMER_ID: CUSTOMER_ID }) "
-            "    MERGE (terminal)-[execute:EXECUTE]-> "
-            "          (t:Transaction { TRANSACTION_ID : TRANSACTION_ID, "
-            "                           TX_DATETIME : TX_DATETIME, "
-            "                           TX_AMOUNT : TX_AMOUNT, "
-            "                           TX_FRAUD : TX_FRAUD }) "
-            "          <-[make:MAKE]-(customer) "
-            "} IN TRANSACTIONS;"
-        )
-        summary = 0
-        with self.driver.session() as session:
-            result = session.run(query, batch=lines)
-            summary = result.consume()
-        return summary
-
     def load_transaction(self, path):
-        self.logger.info(f"Load transaction csv from {path}")
-        chunk_size = 5000
-        total_lines_processed = 0
-        total_time_available = 0
-        total_time_consumed = 0
+        with self.driver.session() as session:
+            query = (
+                "LOAD CSV WITH HEADERS FROM $path AS row "
+                "CALL { "
+                "    WITH row "
+                "    WITH toInteger(row.TRANSACTION_ID) AS TRANSACTION_ID, "
+                "         datetime(replace(row.TX_DATETIME,' ','T')) AS TX_DATETIME, "
+                "         toFloat(row.TX_AMOUNT) AS TX_AMOUNT, "
+                "         toInteger(row.TX_FRAUD) AS TX_FRAUD, "
+                "         toInteger(row.CUSTOMER_ID) AS CUSTOMER_ID, "
+                "         toInteger(row.TERMINAL_ID) AS TERMINAL_ID "
+                "    WHERE TRANSACTION_ID IS NOT NULL "
+                "    MATCH (terminal:Terminal { TERMINAL_ID: TERMINAL_ID }), "
+                "          (customer:Customer { CUSTOMER_ID: CUSTOMER_ID }) "
+                "    MERGE (terminal)-[execute:EXECUTE]-> "
+                "          (t:Transaction { TRANSACTION_ID : TRANSACTION_ID, "
+                "                           TX_DATETIME : TX_DATETIME, "
+                "                           TX_AMOUNT : TX_AMOUNT, "
+                "                           TX_FRAUD : TX_FRAUD }) "
+                "          <-[make:MAKE]-(customer) "
+                "} IN TRANSACTIONS;"
+            )
 
-        with open(path, 'r') as file:
-            next(file)  # Skip header row
-            lines = []
-            for line in file:
-                lines.append(self.parse_csv_line(line))
-                if len(lines) == chunk_size:
-                    summary = self.process_chunk_transaction(lines)
-                    total_lines_processed += len(lines)
-                    total_time_available += summary.result_available_after
-                    total_time_consumed += summary.result_consumed_after
-                    lines = []
-                    self.logger.info(f"Processed {total_lines_processed} lines")
-
-            # Process remaining lines
-            if lines:
-                summary = self.process_chunk_transaction(lines)
-                total_lines_processed += len(lines)
-                total_time_available += summary.result_available_after
-                total_time_consumed += summary.result_consumed_after
-                self.logger.info(f"Processed {total_lines_processed} lines")
-
-        total_time = total_time_available + total_time_consumed
-        self.logger.info(f"Total processed lines: {total_lines_processed}")
-        self.logger.info(f"Total time: {total_time} ms")
+            self.logger.info(f"Load transaction csv from {path}")
+            result = session.run(query, path=path)
+            summary = result.consume()
+            avail = summary.result_available_after
+            cons = summary.result_consumed_after
+            total_time = avail + cons
+            self.logger.info(f"Time: {total_time} ms")
 
     def index_customer(self):
         with self.driver.session() as session:

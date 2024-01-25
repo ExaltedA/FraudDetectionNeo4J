@@ -26,12 +26,13 @@ if __name__ == "__main__":
     
     dataset_template = {100: (2500,  5000, 365),
                         200: (5000, 10000, 365),
-                        300: (7500, 15000, 365)}
+                        300: (7500, 15000, 365),
+                        10:(250, 500, 30)}
     # Generate all datasets
     generate_all_datasets(dataset_template, DIR_DATA, START_DATE, RADIUS)
 
     # setup connection, load and query the database
-    for size in [100, 200, 300]:
+    for size in [10]:
         config = Config(size)
         db = Database(config.Url, config.User,
                       config.Password, f"{DIR_OUTPUT}/{size}")
@@ -43,7 +44,7 @@ if __name__ == "__main__":
             db.load_terminal(f"file:///{size}/terminal.csv")
             db.index_terminal()
 
-            db.load_transaction(f"data/{size}/transaction.csv")
+            db.load_transaction(f"file:///{size}/transaction.csv")
             db.index_transaction()
 
             db.query_1()
