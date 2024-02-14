@@ -236,13 +236,18 @@ class Database:
     def query_4_1(self):
         with self.driver.session() as session:
             query = (
-                "MATCH (t:Transaction) "
-                "SET t.period = CASE "
-                "   WHEN t.transactionDate.hour >= 0 AND t.transactionDate.hour < 6 THEN 'night' "
-                "   WHEN t.transactionDate.hour >= 6 AND t.transactionDate.hour < 12 THEN 'morning' "
-                "   WHEN t.transactionDate.hour >= 12 AND t.transactionDate.hour < 18 THEN 'afternoon' "
-                "   ELSE 'evening' "
-                "END;"
+                 "MATCH (t:Transaction) "
+                "CALL { "
+                "    WITH t "
+                "    WITH "
+                "    CASE "
+                "         WHEN t.transactionDate.hour >= 0 AND t.transactionDate.hour < 6 THEN 'night' "
+                "         WHEN t.transactionDate.hour >= 6 AND t.transactionDate.hour < 12 THEN 'morning' "
+                "         WHEN t.transactionDate.hour >= 12 AND t.transactionDate.hour < 18 THEN 'afternoon' "
+                "    ELSE 'evening' "
+                "    END AS period, t "
+                "    SET t.period = period"
+                "} IN TRANSACTIONS;"
             )
 
             self.logger.info(f"Query 4.1")
@@ -257,13 +262,19 @@ class Database:
         with self.driver.session() as session:
             query = (
                 "MATCH (t:Transaction) "
-                "SET t.product = CASE toInteger(rand() * 5) "
-                "   WHEN 1 THEN 'high-tech' "
-                "   WHEN 2 THEN 'food' "
-                "   WHEN 3 THEN 'clothing' "
-                "   WHEN 4 THEN 'consumable' "
-                "   ELSE 'other' "
-                "END;"
+                "CALL { "
+                "    WITH t "
+                "    WITH apoc.text.random(1, '12345') AS productCode, t "
+                "    WITH "
+                "    CASE productCode "
+                "    WHEN '1' THEN 'high-tech' "
+                "    WHEN '2' THEN 'food' "
+                "    WHEN '3' THEN 'clothing' "
+                "    WHEN '4' THEN 'consumable' "
+                "    ELSE 'other' "
+                "    END AS product, t "
+                "    SET t.product = product "
+                "} IN TRANSACTIONS;"
             )
 
             self.logger.info(f"Query 4.2")
@@ -299,10 +310,9 @@ class Database:
     def query_5(self):
         with self.driver.session() as session:
             query = (
-                "MATCH path = (c:Customer)-[:BUYING_FRIEND*4]-(friend:Customer) "
-                "WHERE c <> friend "
-                "RETURN c.CUSTOMER_ID AS CustomerID, friend.CUSTOMER_ID AS FriendID, LENGTH(path) AS Degree "
-                "ORDER BY CustomerID, FriendID;"
+                "MATCH (user1:Customer)-[:BUYING_FRIEND*4]-(user2:Customer) "
+                "WHERE id(user1) < id(user2) "
+                "RETURN DISTINCT user1.CUSTOMER_ID, user2.CUSTOMER_ID;"
             )
 
             self.logger.info(f"Query 5")
